@@ -8,7 +8,6 @@ import { msalConfig } from './auth/AuthConfig.js'
 
 const msalInstance = new PublicClientApplication(msalConfig);
 
-// Esperamos a que Microsoft se inicialice antes de renderizar la app
 msalInstance.initialize().then(() => {
   ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
