@@ -9,6 +9,8 @@ import { msalConfig } from './auth/AuthConfig.js'
 const msalInstance = new PublicClientApplication(msalConfig);
 
 msalInstance.initialize().then(() => {
+  return msalInstance.handleRedirectPromise();
+}).then(() => {
   createRoot(document.getElementById('root')).render(
     <StrictMode>
       <MsalProvider instance={msalInstance}>
