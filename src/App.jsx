@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMsal, AuthenticatedTemplate, UnauthenticatedTemplate } from '@azure/msal-react';
-import { loginRequest } from './AuthConfig';
+import { loginRequest } from './auth/AuthConfig';
 import './App.css';
 
 const SERVICES = {
