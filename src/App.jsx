@@ -26,8 +26,8 @@ function App() {
       });
       return response.accessToken;
     } catch (e) {
-      const response = await instance.acquireTokenPopup(loginRequest);
-      return response.accessToken;
+      // Modificado para usar Redirect en caso de que falle el token silencioso
+      await instance.acquireTokenRedirect(loginRequest);
     }
   };
 
@@ -51,8 +51,9 @@ function App() {
     }
   };
 
-  const handleLogin = () => instance.loginPopup(loginRequest);
-  const handleLogout = () => instance.logoutPopup();
+  // Modificados para forzar la redirección completa
+  const handleLogin = () => instance.loginRedirect(loginRequest);
+  const handleLogout = () => instance.logoutRedirect();
 
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '900px', margin: '0 auto' }}>
