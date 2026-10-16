@@ -6,8 +6,7 @@ import './App.css';
 const SERVICES = {
   CATALOGO: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/catalogo',
   INVENTARIO: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/inventario',
-  PEDIDOS_LOCAL: 'http://localhost:8080/api/pedidos',
-  PEDIDOS: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/pedidos',
+  PEDIDOS_LOCAL: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/pedidos', 
   USUARIOS: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/usuarios/perfil',
   PAGOS: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/pagos/procesar',
   NOTIFICACIONES: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/notificaciones'
