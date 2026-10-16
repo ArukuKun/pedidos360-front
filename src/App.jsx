@@ -21,14 +21,10 @@ const SCOPES = {
 function App() {
   const { instance, accounts } = useMsal();
   const [log, setLog] = useState('');
+  
   const [catalogo, setCatalogo] = useState([]);
   const [inventario, setInventario] = useState({});
-  const [productoSeleccionado, setProductoSeleccionado] = useState(null);
-
-  // Estados para agregar un nuevo producto con stock
-  const [nuevoNombre, setNuevoNombre] = useState('');
-  const [nuevoPrecio, setNuevoPrecio] = useState('');
-  const [nuevoStock, setNuevoStock] = useState('');
+  const [carrito, setCarrito] = useState([]);
 
   const getAccessToken = async (scopesToRequest) => {
     try {
@@ -38,9 +34,15 @@ function App() {
       });
       return response.accessToken;
     } catch (e) {
-      await instance.acquireTokenRedirect({
-        scopes: scopesToRequest || loginRequest.scopes
-      });
+      try {
+        const popupResponse = await instance.acquireTokenPopup({
+          scopes: scopesToRequest || loginRequest.scopes
+        });
+        return popupResponse.accessToken;
+      } catch (err) {
+        console.error("Error al obtener token:", err);
+        return null;
+      }
     }
   };
 
@@ -48,9 +50,11 @@ function App() {
     try {
       const token = await getAccessToken(scopes);
       const headers = {
-        'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       
       const config = { method, headers };
       if (body) config.body = JSON.stringify(body);
@@ -69,98 +73,112 @@ function App() {
     }
   };
 
-  const normalizarProductos = (lista) => {
-    return lista.map((p, idx) => ({
-      id: p.id || idx + 1,
-      nombre: typeof p === 'string' ? p : (p.nombre || `Producto ${idx + 1}`),
-      precio: p.precio || '$20.000',
-      stock: p.stock !== undefined ? Number(p.stock) : 5
-    }));
-  };
-
   const handleVerCatalogo = async () => {
-    const rawData = await callApi(SERVICES.CATALOGO, 'GET', null, SCOPES.CATALOGO);
-    const mockCatalogo = [
-      { id: 1, nombre: 'Teclado Mecánico RGB', precio: '$45.000', stock: 5 },
-      { id: 2, nombre: 'Mouse Gamer 16000 DPI', precio: '$25.000', stock: 3 },
-      { id: 3, nombre: 'Monitor 144Hz 24"', precio: '$180.000', stock: 2 },
-      { id: 4, nombre: 'Audífonos 7.1 Surround', precio: '$35.000', stock: 0 }
-    ];
-
+    const rawCat = await callApi(SERVICES.CATALOGO, 'GET', null, SCOPES.CATALOGO);
+    let catList = [];
     try {
-      const parsed = JSON.parse(rawData);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        setCatalogo(normalizarProductos(parsed));
-      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.productos)) {
-        setCatalogo(normalizarProductos(parsed.productos));
-      } else {
-        setCatalogo(mockCatalogo);
+      const parsedCat = JSON.parse(rawCat);
+      catList = Array.isArray(parsedCat) ? parsedCat : ["Hamburguesa Triple", "Papas Supremas", "Bebida Grande", "Pizza Familiar", "Pastel de Chocolate"];
+    } catch {
+      catList = ["Hamburguesa Triple", "Papas Supremas", "Bebida Grande", "Pizza Familiar", "Pastel de Chocolate"];
+    }
+    setCatalogo(catList);
+
+    const rawInv = await callApi(SERVICES.INVENTARIO, 'GET', null, SCOPES.INVENTARIO);
+    try {
+      const parsedInv = JSON.parse(rawInv);
+      if (typeof parsedInv === 'object' && !Array.isArray(parsedInv)) {
+        setInventario(parsedInv);
       }
     } catch {
-      setCatalogo(mockCatalogo);
+      setInventario({
+        "Hamburguesa Triple": 50,
+        "Pizza Familiar": 30,
+        "Papas Supremas": 100,
+        "Pastel de Chocolate": 20,
+        "Bebida Grande": 80
+      });
     }
   };
 
-  const handleAgregarProducto = async (e) => {
-    e.preventDefault();
-    if (!nuevoNombre.trim() || !nuevoPrecio.trim()) return;
+  const handleVerInventario = async () => {
+    const rawInv = await callApi(SERVICES.INVENTARIO, 'GET', null, SCOPES.INVENTARIO);
+    try {
+      const parsed = JSON.parse(rawInv);
+      if (typeof parsed === 'object') setInventario(parsed);
+    } catch {}
+  };
 
-    const stockNum = parseInt(nuevoStock, 10);
-    const nuevoProd = {
-      id: Date.now(),
-      nombre: nuevoNombre,
-      precio: nuevoPrecio.startsWith('$') ? nuevoPrecio : `$${nuevoPrecio}`,
-      stock: isNaN(stockNum) ? 10 : stockNum
-    };
+  const agregarAlCarrito = (nombreProducto) => {
+    const stockActual = inventario[nombreProducto] !== undefined ? inventario[nombreProducto] : 50;
+    if (stockActual <= 0) return;
 
-    // Envía la petición POST al microservicio de Catálogo
-    await callApi(SERVICES.CATALOGO, 'POST', nuevoProd, SCOPES.CATALOGO);
+    setInventario(prev => ({
+      ...prev,
+      [nombreProducto]: (prev[nombreProducto] !== undefined ? prev[nombreProducto] : 50) - 1
+    }));
 
-    // Añade el producto al listado local
-    setCatalogo(prev => [...prev, nuevoProd]);
+    setCarrito(prev => {
+      const existe = prev.find(item => item.nombre === nombreProducto);
+      if (existe) {
+        return prev.map(item =>
+          item.nombre === nombreProducto
+            ? { ...item, cantidad: item.cantidad + 1 }
+            : item
+        );
+      }
+      return [...prev, { nombre: nombreProducto, cantidad: 1 }];
+    });
+  };
 
-    // Limpia los inputs del formulario
-    setNuevoNombre('');
-    setNuevoPrecio('');
-    setNuevoStock('');
+  const quitarDelCarrito = (nombreProducto) => {
+    const itemEnCarrito = carrito.find(item => item.nombre === nombreProducto);
+    if (!itemEnCarrito) return;
+
+    setInventario(prev => ({
+      ...prev,
+      [nombreProducto]: (prev[nombreProducto] || 0) + 1
+    }));
+
+    setCarrito(prev => {
+      if (itemEnCarrito.cantidad > 1) {
+        return prev.map(item =>
+          item.nombre === nombreProducto
+            ? { ...item, cantidad: item.cantidad - 1 }
+            : item
+        );
+      }
+      return prev.filter(item => item.nombre !== nombreProducto);
+    });
+  };
+
+  const vaciarCarrito = () => {
+    setInventario(prev => {
+      const nuevoInv = { ...prev };
+      carrito.forEach(item => {
+        nuevoInv[item.nombre] = (nuevoInv[item.nombre] || 0) + item.cantidad;
+      });
+      return nuevoInv;
+    });
+    setCarrito([]);
   };
 
   const handleCrearPedido = async () => {
-    if (!productoSeleccionado) return;
-
-    const prodEnCatalogo = catalogo.find(p => p.nombre === productoSeleccionado.nombre);
-
-    if (prodEnCatalogo && prodEnCatalogo.stock <= 0) {
-      setLog('⚠️ Error: El producto seleccionado no tiene stock disponible.');
-      return;
-    }
-
-    // 1. Petición POST al backend local (RabbitMQ)
-    await callApi(SERVICES.PEDIDOS_LOCAL, 'POST', productoSeleccionado.nombre);
-
-    // 2. Descontar 1 unidad del stock localmente
-    setCatalogo(prev => prev.map(item => {
-      if (item.nombre === productoSeleccionado.nombre) {
-        const stockActualizado = item.stock - 1;
-        return { ...item, stock: stockActualizado > 0 ? stockActualizado : 0 };
-      }
-      return item;
-    }));
-
-    // 3. Actualizar la selección actual o quitarla si ya no hay stock
-    if (prodEnCatalogo && prodEnCatalogo.stock - 1 <= 0) {
-      setProductoSeleccionado(null);
-    } else {
-      setProductoSeleccionado(prev => prev ? { ...prev, stock: prev.stock - 1 } : null);
-    }
+    if (carrito.length === 0) return;
+    const detallePedido = carrito.map(i => `${i.nombre} (x${i.cantidad})`).join(', ');
+    await callApi(SERVICES.PEDIDOS_LOCAL, 'POST', { pedido: detallePedido, items: carrito });
+    setCarrito([]);
   };
 
   const handleLogin = () => instance.loginRedirect(loginRequest);
   const handleLogout = () => instance.logoutRedirect();
 
+  const totalProductosCarrito = carrito.reduce((sum, i) => sum + i.cantidad, 0);
+
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '900px', margin: '0 auto' }}>
       <h1>📦 Plataforma Pedidos360</h1>
+
       <UnauthenticatedTemplate>
         <div style={{ textAlign: 'center', margin: '50px 0' }}>
           <p>Debes iniciar sesión con tu cuenta de Microsoft Entra ID para acceder al sistema.</p>
@@ -169,27 +187,29 @@ function App() {
           </button>
         </div>
       </UnauthenticatedTemplate>
+
       <AuthenticatedTemplate>
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #ccc', paddingBottom: '10px' }}>
           <span>Bienvenido, <strong>{accounts[0]?.username}</strong></span>
           <button onClick={handleLogout} style={{ padding: '5px 10px', cursor: 'pointer' }}>Cerrar Sesión</button>
         </header>
+
         <main style={{ marginTop: '20px' }}>
           <h2>Prueba de Microservicios</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
             <button onClick={handleVerCatalogo}>1. Ver Catálogo</button>
-            <button onClick={async () => setInventario(await callApi(SERVICES.INVENTARIO, 'GET', null, SCOPES.INVENTARIO))}>2. Ver Inventario</button>
+            <button onClick={handleVerInventario}>2. Ver Inventario</button>
             <button onClick={() => callApi(SERVICES.USUARIOS)}>3. Ver Perfil Usuario</button>
             <button onClick={() => callApi(SERVICES.PEDIDOS_LOCAL)}>4. Consultar Pedidos</button>
             
             <button 
               onClick={handleCrearPedido}
-              disabled={!productoSeleccionado || productoSeleccionado.stock <= 0}
+              disabled={carrito.length === 0}
               style={{ 
-                backgroundColor: (productoSeleccionado && productoSeleccionado.stock > 0) ? '#28a745' : '#6c757d', 
+                backgroundColor: carrito.length > 0 ? '#28a745' : '#6c757d', 
                 color: 'white', 
                 fontWeight: 'bold',
-                cursor: (productoSeleccionado && productoSeleccionado.stock > 0) ? 'pointer' : 'not-allowed'
+                cursor: carrito.length > 0 ? 'pointer' : 'not-allowed'
               }}
             >
               🛒 Crear Pedido (RabbitMQ)
@@ -199,92 +219,79 @@ function App() {
             <button onClick={() => callApi(SERVICES.NOTIFICACIONES, 'POST', { destinatario: accounts[0]?.username, mensaje: 'Tu pedido ha sido creado' })}>6. Enviar Notificación</button>
           </div>
 
-          {/* Sección Carrito / Producto Seleccionado */}
-          <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #007bff', borderRadius: '5px', backgroundColor: '#e9f5ff' }}>
-            <h3 style={{ margin: '0 0 10px 0' }}>🛒 Carrito / Producto Seleccionado:</h3>
-            {productoSeleccionado ? (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <strong>{productoSeleccionado.nombre}</strong> ({productoSeleccionado.precio})
-                  <span style={{ marginLeft: '10px', fontSize: '13px', color: '#28a745', fontWeight: 'bold' }}>
-                    [Stock disponible: {productoSeleccionado.stock}]
-                  </span>
-                </div>
+          <div style={{ marginTop: '20px', padding: '15px', border: '2px solid #28a745', borderRadius: '8px', backgroundColor: '#f4fff6', color: '#000' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#155724' }}>
+                🛒 Carrito de Compras ({totalProductosCarrito} {totalProductosCarrito === 1 ? 'unidad' : 'unidades'})
+              </h3>
+              {carrito.length > 0 && (
                 <button 
-                  onClick={() => setProductoSeleccionado(null)} 
-                  style={{ backgroundColor: '#dc3545', color: 'white', border: 'none', padding: '5px 10px', cursor: 'pointer', borderRadius: '3px' }}
+                  onClick={vaciarCarrito}
+                  style={{ backgroundColor: '#dc3545', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer' }}
                 >
-                  Quitar
+                  Vaciar Carrito
                 </button>
+              )}
+            </div>
+
+            {carrito.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {carrito.map((item) => (
+                  <div key={item.nombre} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: '8px 12px', borderRadius: '4px', border: '1px solid #ced4da', color: '#000' }}>
+                    <span><strong>{item.nombre}</strong> — Cantidad: <strong>{item.cantidad}</strong></span>
+                    <div>
+                      <button 
+                        onClick={() => agregarAlCarrito(item.nombre)} 
+                        disabled={(inventario[item.nombre] !== undefined ? inventario[item.nombre] : 50) <= 0}
+                        style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '3px 8px', borderRadius: '3px', cursor: 'pointer', marginRight: '5px' }}
+                      >
+                        +
+                      </button>
+                      <button 
+                        onClick={() => quitarDelCarrito(item.nombre)} 
+                        style={{ backgroundColor: '#ffc107', color: '#000', border: 'none', padding: '3px 8px', borderRadius: '3px', cursor: 'pointer' }}
+                      >
+                        -
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
-              <p style={{ margin: 0, color: '#666' }}>No has seleccionado ningún producto. Haz clic en "1. Ver Catálogo" y elige uno con stock disponible.</p>
+              <p style={{ margin: 0, color: '#6c757d' }}>El carrito está vacío. Haz clic en "1. Ver Catálogo" y añade productos.</p>
             )}
           </div>
 
-          {/* Listado de Productos y Formulario */}
           {catalogo.length > 0 && (
             <div style={{ marginTop: '20px' }}>
-              <h3>📦 Productos del Catálogo:</h3>
-              
-              <form onSubmit={handleAgregarProducto} style={{ display: 'flex', gap: '10px', marginBottom: '15px', backgroundColor: '#f8f9fa', padding: '10px', borderRadius: '5px', border: '1px solid #ddd' }}>
-                <input 
-                  type="text" 
-                  placeholder="Nombre del producto" 
-                  value={nuevoNombre} 
-                  onChange={(e) => setNuevoNombre(e.target.value)}
-                  style={{ flex: 2, padding: '8px' }}
-                  required
-                />
-                <input 
-                  type="text" 
-                  placeholder="Precio (ej: 50.000)" 
-                  value={nuevoPrecio} 
-                  onChange={(e) => setNuevoPrecio(e.target.value)}
-                  style={{ flex: 1, padding: '8px' }}
-                  required
-                />
-                <input 
-                  type="number" 
-                  placeholder="Stock (ej: 10)" 
-                  value={nuevoStock} 
-                  onChange={(e) => setNuevoStock(e.target.value)}
-                  style={{ width: '100px', padding: '8px' }}
-                  min="1"
-                  required
-                />
-                <button type="submit" style={{ backgroundColor: '#17a2b8', color: 'white', border: 'none', padding: '8px 15px', cursor: 'pointer', borderRadius: '3px', fontWeight: 'bold' }}>
-                  ➕ Añadir al Catálogo
-                </button>
-              </form>
-
+              <h3>📦 Catálogo de Productos y Stock:</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
                 {catalogo.map((prod) => {
-                  const tieneStock = prod.stock > 0;
+                  const stockDisponible = inventario[prod] !== undefined ? inventario[prod] : 50;
+                  const tieneStock = stockDisponible > 0;
                   return (
-                    <div key={prod.id} style={{ border: '1px solid #ddd', padding: '12px', borderRadius: '5px', display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: '#fff' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span><strong>{prod.nombre}</strong> - {prod.precio}</span>
+                    <div key={prod} style={{ border: '1px solid #ddd', padding: '12px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', color: '#000' }}>
+                      <div>
+                        <div style={{ fontWeight: 'bold', fontSize: '15px' }}>{prod}</div>
+                        <div style={{ fontSize: '13px', color: tieneStock ? '#28a745' : '#dc3545', fontWeight: 'bold', marginTop: '4px' }}>
+                          {tieneStock ? `Stock disponible: ${stockDisponible}` : '❌ Agotado'}
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '13px', color: tieneStock ? '#28a745' : '#dc3545', fontWeight: 'bold' }}>
-                          {tieneStock ? `Stock: ${prod.stock} un.` : '❌ Sin Stock'}
-                        </span>
-                        <button 
-                          onClick={() => setProductoSeleccionado(prod)}
-                          disabled={!tieneStock}
-                          style={{ 
-                            backgroundColor: tieneStock ? '#007bff' : '#6c757d', 
-                            color: 'white', 
-                            border: 'none', 
-                            padding: '5px 10px', 
-                            cursor: tieneStock ? 'pointer' : 'not-allowed', 
-                            borderRadius: '3px' 
-                          }}
-                        >
-                          {tieneStock ? 'Añadir al Carrito' : 'Agotado'}
-                        </button>
-                      </div>
+                      <button 
+                        onClick={() => agregarAlCarrito(prod)}
+                        disabled={!tieneStock}
+                        style={{ 
+                          backgroundColor: tieneStock ? '#007bff' : '#6c757d', 
+                          color: 'white', 
+                          border: 'none', 
+                          padding: '8px 12px', 
+                          cursor: tieneStock ? 'pointer' : 'not-allowed', 
+                          borderRadius: '4px',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        {tieneStock ? '➕ Añadir al Carrito' : 'Agotado'}
+                      </button>
                     </div>
                   );
                 })}
@@ -293,7 +300,7 @@ function App() {
           )}
 
           <h3 style={{ marginTop: '20px' }}>Respuesta de la API / Log:</h3>
-          <pre style={{ background: '#f4f4f4', padding: '15px', borderRadius: '5px', overflowX: 'auto', maxHeight: '300px' }}>
+          <pre style={{ background: '#f4f4f4', color: '#000', padding: '15px', borderRadius: '5px', overflowX: 'auto', maxHeight: '300px' }}>
             {log || 'Haz clic en algún botón para probar la integración con los microservicios...'}
           </pre>
         </main>
