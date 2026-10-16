@@ -201,7 +201,8 @@ function App() {
       cliente: accounts[0]?.username || 'usuario.prueba@pedidos360.cl',
       items: itemsConPrecio,
       total: totalMonto,
-      estado: 'PENDIENTE DE PAGO ⏳'
+      estado: 'PENDIENTE DE PAGO ⏳',
+      notificacionEnviada: false
     };
 
     setBoleta(nuevaBoleta);
@@ -277,6 +278,53 @@ function App() {
     }
   };
 
+  const handleEnviarNotificacionPedido = async (pedidoTarget) => {
+    const correoUsuario = accounts[0]?.username || 'usuario.prueba@pedidos360.cl';
+    const detalleProductos = pedidoTarget.items.map(i => `${i.nombre} (x${i.cantidad}) - $${i.subtotal.toLocaleString()} CLP`).join('\n - ');
+    const mensajeTexto = `¡Compra realizada exitosamente!\n\nEstimado cliente, confirmamos la recepción de tu compra (${pedidoTarget.numero}).\n\nDetalle de la compra:\n - ${detalleProductos}\n\nTotal Pagado: $${pedidoTarget.total.toLocaleString()} CLP.\n¡Gracias por tu compra en Pedidos360!`;
+
+    await callApi(SERVICES.NOTIFICACIONES, 'POST', {
+      destinatario: correoUsuario,
+      asunto: `Confirmación de Compra Exitosa - Boleta ${pedidoTarget.numero}`,
+      mensaje: mensajeTexto,
+      pedidoId: pedidoTarget.idPedido,
+      boleta: pedidoTarget.numero,
+      montoTotal: pedidoTarget.total,
+      estadoCompra: "COMPRA_REALIZADA_OK"
+    });
+
+    setPedidosHistorial(prev => prev.map(p => 
+      p.numero === pedidoTarget.numero ? { ...p, notificacionEnviada: true } : p
+    ));
+
+    if (boleta && boleta.numero === pedidoTarget.numero) {
+      setBoleta(prev => prev ? { ...prev, notificacionEnviada: true } : null);
+    }
+
+    setLog(JSON.stringify({
+      evento: "CORREO_NOTIFICACION_ENVIADO",
+      destinatario: correoUsuario,
+      asunto: `Confirmación de Compra Exitosa - Boleta ${pedidoTarget.numero}`,
+      mensaje: "Compra realizada exitosamente y correo de confirmación enviado.",
+      detalleEnvio: {
+        boleta: pedidoTarget.numero,
+        total: pedidoTarget.total,
+        estado: "ENVIADO_OK"
+      }
+    }, null, 2));
+  };
+
+  const handleNotificarUltimoPedidoOGenerico = () => {
+    if (pedidosHistorial.length > 0) {
+      handleEnviarNotificacionPedido(pedidosHistorial[0]);
+    } else {
+      callApi(SERVICES.NOTIFICACIONES, 'POST', { 
+        destinatario: accounts[0]?.username || 'usuario.prueba@pedidos360.cl', 
+        mensaje: 'Tu compra ha sido realizada exitosamente en Pedidos360.' 
+      });
+    }
+  };
+
   const handleLogin = () => instance.loginRedirect(loginRequest);
   const handleLogout = () => instance.logoutRedirect();
 
@@ -322,8 +370,8 @@ function App() {
               🛒 Crear Pedido (RabbitMQ)
             </button>
 
-            <button onClick={handleProbarPago}>5. Probar Pago OK</button>
-            <button onClick={() => callApi(SERVICES.NOTIFICACIONES, 'POST', { destinatario: accounts[0]?.username, mensaje: 'Tu pedido ha sido creado' })}>6. Enviar Notificación</button>
+            <button onClick={handleProbarPago} style={{ backgroundColor: '#007bff', color: 'white', fontWeight: 'bold' }}>5. Pagar</button>
+            <button onClick={handleNotificarUltimoPedidoOGenerico}>6. Enviar Notificación</button>
           </div>
 
           {/* CAJA DEL CARRITO */}
@@ -408,19 +456,32 @@ function App() {
                 </tbody>
               </table>
 
-              <div style={{ textAlign: 'right', marginTop: '15px', fontSize: '18px', fontWeight: 'bold', color: '#28a745' }}>
-                TOTAL: ${boleta.total.toLocaleString()} CLP
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
+                <div>
+                  {boleta.notificacionEnviada ? (
+                    <button disabled style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px', fontWeight: 'bold', cursor: 'default' }}>
+                      ✅ Enviado
+                    </button>
+                  ) : (
+                    <button onClick={() => handleEnviarNotificacionPedido(boleta)} style={{ backgroundColor: '#17a2b8', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
+                      📩 Enviar Notificación de Compra
+                    </button>
+                  )}
+                </div>
+                <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#28a745' }}>
+                  TOTAL: ${boleta.total.toLocaleString()} CLP
+                </div>
               </div>
             </div>
           )}
 
-          {/* VISTA DEL HISTORIAL DE TODOS LOS PEDIDOS REALIZADOS */}
+          {/* SECCIÓN DE NOTIFICACIONES Y TODOS LOS PEDIDOS REALIZADOS */}
           {pedidosHistorial.length > 0 && (
-            <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #6c757d', borderRadius: '8px', backgroundColor: '#ffffff', color: '#000' }}>
-              <h3 style={{ margin: '0 0 15px 0', color: '#343a40' }}>📋 Historial de Todos los Pedidos ({pedidosHistorial.length})</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #17a2b8', borderRadius: '8px', backgroundColor: '#ffffff', color: '#000' }}>
+              <h3 style={{ margin: '0 0 15px 0', color: '#117a8b' }}>📩 Enviar Notificación — Lista de Todos los Pedidos ({pedidosHistorial.length})</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {pedidosHistorial.map((ped) => (
-                  <div key={ped.numero} style={{ padding: '12px', border: '1px solid #dee2e6', borderRadius: '6px', backgroundColor: '#f8f9fa' }}>
+                  <div key={ped.numero} style={{ padding: '14px', border: '1px solid #dee2e6', borderRadius: '6px', backgroundColor: '#f8f9fa' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <div>
                         <strong>{ped.numero}</strong> ({ped.idPedido}) — <small style={{ color: '#6c757d' }}>{ped.fecha}</small>
@@ -429,11 +490,25 @@ function App() {
                         {ped.estado}
                       </span>
                     </div>
-                    <div style={{ fontSize: '13px', color: '#495057' }}>
-                      <strong>Detalle:</strong> {ped.items.map(i => `${i.nombre} (x${i.cantidad})`).join(', ')}
+
+                    <div style={{ fontSize: '13px', color: '#495057', marginBottom: '10px' }}>
+                      <strong>Productos:</strong> {ped.items.map(i => `${i.nombre} (x${i.cantidad})`).join(', ')}
                     </div>
-                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#28a745', marginTop: '5px', textAlign: 'right' }}>
-                      Monto: ${ped.total.toLocaleString()} CLP
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      {ped.notificacionEnviada ? (
+                        <button disabled style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '4px', fontWeight: 'bold', cursor: 'default' }}>
+                          ✅ Enviado
+                        </button>
+                      ) : (
+                        <button onClick={() => handleEnviarNotificacionPedido(ped)} style={{ backgroundColor: '#17a2b8', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
+                          📩 Enviar Notificación
+                        </button>
+                      )}
+
+                      <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#28a745' }}>
+                        Monto: ${ped.total.toLocaleString()} CLP
+                      </div>
                     </div>
                   </div>
                 ))}
