@@ -6,7 +6,8 @@ import './App.css';
 const SERVICES = {
   CATALOGO: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/catalogo',
   INVENTARIO: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/inventario',
-  PEDIDOS_LOCAL: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/pedidos', 
+  PEDIDOS_LOCAL: 'http://localhost:8080/api/pedidos',
+  PEDIDOS: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/pedidos',
   USUARIOS: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/usuarios/perfil',
   PAGOS: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/pagos/procesar',
   NOTIFICACIONES: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/notificaciones'
@@ -33,6 +34,7 @@ function App() {
   const [inventario, setInventario] = useState({});
   const [carrito, setCarrito] = useState([]);
   const [boleta, setBoleta] = useState(null);
+  const [pedidosHistorial, setPedidosHistorial] = useState([]);
 
   const getAccessToken = async (scopesToRequest) => {
     try {
@@ -193,6 +195,7 @@ function App() {
     const numBoleta = `BOL-${Math.floor(100000 + Math.random() * 900000)}`;
 
     const nuevaBoleta = {
+      idPedido: `PED-${Math.floor(1000 + Math.random() * 9000)}`,
       numero: numBoleta,
       fecha: new Date().toLocaleString('es-CL'),
       cliente: accounts[0]?.username || 'usuario.prueba@pedidos360.cl',
@@ -202,6 +205,7 @@ function App() {
     };
 
     setBoleta(nuevaBoleta);
+    setPedidosHistorial(prev => [nuevaBoleta, ...prev]);
 
     const detallePedido = itemsConPrecio.map(i => `${i.nombre} (x${i.cantidad})`).join(', ');
     
@@ -218,6 +222,29 @@ function App() {
     }, null, 2));
 
     setCarrito([]);
+  };
+
+  const handleConsultarPedidos = async () => {
+    const rawData = await callApi(SERVICES.PEDIDOS_LOCAL, 'GET');
+    
+    let apiPedidos = null;
+    try {
+      apiPedidos = JSON.parse(rawData);
+    } catch {}
+
+    if (Array.isArray(apiPedidos) && apiPedidos.length > 0) {
+      setLog(JSON.stringify(apiPedidos, null, 2));
+    } else if (pedidosHistorial.length > 0) {
+      setLog(JSON.stringify({
+        totalPedidosRegistrados: pedidosHistorial.length,
+        pedidos: pedidosHistorial
+      }, null, 2));
+    } else {
+      setLog(JSON.stringify({
+        mensaje: "No hay pedidos registrados en el sistema.",
+        pedidos: []
+      }, null, 2));
+    }
   };
 
   const handleProbarPago = async () => {
@@ -239,6 +266,7 @@ function App() {
       };
 
       setBoleta(boletaPagada);
+      setPedidosHistorial(prev => prev.map(p => p.numero === boleta.numero ? boletaPagada : p));
 
       setLog(JSON.stringify({
         evento: "PAGO_PROCESADO_EXITOSAMENTE",
@@ -279,7 +307,7 @@ function App() {
             <button onClick={handleVerCatalogo}>1. Ver Catálogo</button>
             <button onClick={handleVerInventario}>2. Ver Inventario</button>
             <button onClick={() => callApi(SERVICES.USUARIOS)}>3. Ver Perfil Usuario</button>
-            <button onClick={() => callApi(SERVICES.PEDIDOS_LOCAL)}>4. Consultar Pedidos</button>
+            <button onClick={handleConsultarPedidos}>4. Consultar Pedidos</button>
             
             <button 
               onClick={handleCrearPedido}
@@ -342,17 +370,18 @@ function App() {
             )}
           </div>
 
-          {/* VISTA DE BOLETA DIGITAL */}
+          {/* VISTA DE BOLETA DIGITAL ACTUAL */}
           {boleta && (
             <div style={{ marginTop: '20px', padding: '20px', border: '2px dashed #007bff', borderRadius: '8px', backgroundColor: '#f8f9fa', color: '#000', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #007bff', paddingBottom: '10px', marginBottom: '15px' }}>
-                <h3 style={{ margin: 0, color: '#007bff' }}>🧾 Boleta Electrónica: {boleta.numero}</h3>
+                <h3 style={{ margin: 0, color: '#007bff' }}>🧾 Última Boleta Generada: {boleta.numero}</h3>
                 <span style={{ padding: '6px 12px', borderRadius: '20px', fontWeight: 'bold', fontSize: '13px', backgroundColor: boleta.estado.includes('OK') ? '#d4edda' : '#fff3cd', color: boleta.estado.includes('OK') ? '#155724' : '#856404', border: `1px solid ${boleta.estado.includes('OK') ? '#c3e6cb' : '#ffeeba'}` }}>
                   {boleta.estado}
                 </span>
               </div>
 
               <div style={{ fontSize: '14px', marginBottom: '10px' }}>
+                <p style={{ margin: '3px 0' }}><strong>ID Pedido:</strong> {boleta.idPedido}</p>
                 <p style={{ margin: '3px 0' }}><strong>Cliente:</strong> {boleta.cliente}</p>
                 <p style={{ margin: '3px 0' }}><strong>Fecha Emisión:</strong> {boleta.fecha}</p>
                 {boleta.fechaPago && <p style={{ margin: '3px 0', color: '#28a745' }}><strong>Fecha Pago:</strong> {boleta.fechaPago}</p>}
@@ -381,6 +410,33 @@ function App() {
 
               <div style={{ textAlign: 'right', marginTop: '15px', fontSize: '18px', fontWeight: 'bold', color: '#28a745' }}>
                 TOTAL: ${boleta.total.toLocaleString()} CLP
+              </div>
+            </div>
+          )}
+
+          {/* VISTA DEL HISTORIAL DE TODOS LOS PEDIDOS REALIZADOS */}
+          {pedidosHistorial.length > 0 && (
+            <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #6c757d', borderRadius: '8px', backgroundColor: '#ffffff', color: '#000' }}>
+              <h3 style={{ margin: '0 0 15px 0', color: '#343a40' }}>📋 Historial de Todos los Pedidos ({pedidosHistorial.length})</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {pedidosHistorial.map((ped) => (
+                  <div key={ped.numero} style={{ padding: '12px', border: '1px solid #dee2e6', borderRadius: '6px', backgroundColor: '#f8f9fa' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div>
+                        <strong>{ped.numero}</strong> ({ped.idPedido}) — <small style={{ color: '#6c757d' }}>{ped.fecha}</small>
+                      </div>
+                      <span style={{ fontSize: '12px', padding: '3px 8px', borderRadius: '12px', fontWeight: 'bold', backgroundColor: ped.estado.includes('OK') ? '#d4edda' : '#fff3cd', color: ped.estado.includes('OK') ? '#155724' : '#856404' }}>
+                        {ped.estado}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#495057' }}>
+                      <strong>Detalle:</strong> {ped.items.map(i => `${i.nombre} (x${i.cantidad})`).join(', ')}
+                    </div>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#28a745', marginTop: '5px', textAlign: 'right' }}>
+                      Monto: ${ped.total.toLocaleString()} CLP
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
