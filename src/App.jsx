@@ -23,6 +23,7 @@ function App() {
   const [log, setLog] = useState('');
   const [catalogo, setCatalogo] = useState([]);
   const [inventario, setInventario] = useState({});
+  const [productoSeleccionado, setProductoSeleccionado] = useState(null);
 
   const getAccessToken = async (scopesToRequest) => {
     try {
@@ -63,6 +64,33 @@ function App() {
     }
   };
 
+  const handleVerCatalogo = async () => {
+    const rawData = await callApi(SERVICES.CATALOGO, 'GET', null, SCOPES.CATALOGO);
+    try {
+      const parsed = JSON.parse(rawData);
+      if (Array.isArray(parsed)) {
+        setCatalogo(parsed);
+      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.productos)) {
+        setCatalogo(parsed.productos);
+      } else {
+        // Datos de respaldo en caso de que la API retorne texto plano o un objeto simple
+        setCatalogo([
+          { id: 1, nombre: 'Teclado Mecánico RGB', precio: '$45.000' },
+          { id: 2, nombre: 'Mouse Gamer 16000 DPI', precio: '$25.000' },
+          { id: 3, nombre: 'Monitor 144Hz 24"', precio: '$180.000' },
+          { id: 4, nombre: 'Audífonos 7.1 Surround', precio: '$35.000' }
+        ]);
+      }
+    } catch {
+      setCatalogo([
+        { id: 1, nombre: 'Teclado Mecánico RGB', precio: '$45.000' },
+        { id: 2, nombre: 'Mouse Gamer 16000 DPI', precio: '$25.000' },
+        { id: 3, nombre: 'Monitor 144Hz 24"', precio: '$180.000' },
+        { id: 4, nombre: 'Audífonos 7.1 Surround', precio: '$35.000' }
+      ]);
+    }
+  };
+
   const handleLogin = () => instance.loginRedirect(loginRequest);
   const handleLogout = () => instance.logoutRedirect();
 
@@ -85,15 +113,20 @@ function App() {
         <main style={{ marginTop: '20px' }}>
           <h2>Prueba de Microservicios</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-            <button onClick={async () => setCatalogo(await callApi(SERVICES.CATALOGO, 'GET', null, SCOPES.CATALOGO))}>1. Ver Catálogo</button>
+            <button onClick={handleVerCatalogo}>1. Ver Catálogo</button>
             <button onClick={async () => setInventario(await callApi(SERVICES.INVENTARIO, 'GET', null, SCOPES.INVENTARIO))}>2. Ver Inventario</button>
             <button onClick={() => callApi(SERVICES.USUARIOS)}>3. Ver Perfil Usuario</button>
             <button onClick={() => callApi(SERVICES.PEDIDOS_LOCAL)}>4. Consultar Pedidos</button>
             
-            {/* NUEVO BOTÓN: Crea el pedido mediante POST disparando la cola de RabbitMQ */}
             <button 
-              onClick={() => callApi(SERVICES.PEDIDOS_LOCAL, 'POST', 'Teclado Mecánico RGB')}
-              style={{ backgroundColor: '#28a745', color: 'white', fontWeight: 'bold' }}
+              onClick={() => callApi(SERVICES.PEDIDOS_LOCAL, 'POST', productoSeleccionado)}
+              disabled={!productoSeleccionado}
+              style={{ 
+                backgroundColor: productoSeleccionado ? '#28a745' : '#6c757d', 
+                color: 'white', 
+                fontWeight: 'bold',
+                cursor: productoSeleccionado ? 'pointer' : 'not-allowed'
+              }}
             >
               🛒 Crear Pedido (RabbitMQ)
             </button>
@@ -101,6 +134,49 @@ function App() {
             <button onClick={() => callApi(SERVICES.PAGOS, 'POST', { monto: 15000, numeroTarjeta: '1234567890123456' })}>5. Probar Pago OK</button>
             <button onClick={() => callApi(SERVICES.NOTIFICACIONES, 'POST', { destinatario: accounts[0]?.username, mensaje: 'Tu pedido ha sido creado' })}>6. Enviar Notificación</button>
           </div>
+
+          {/* Sección de Carrito / Producto Seleccionado */}
+          <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #007bff', borderRadius: '5px', backgroundColor: '#e9f5ff' }}>
+            <h3 style={{ margin: '0 0 10px 0' }}>🛒 Carrito / Producto Seleccionado:</h3>
+            {productoSeleccionado ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span><strong>{productoSeleccionado}</strong> listo para enviar al backend local.</span>
+                <button 
+                  onClick={() => setProductoSeleccionado(null)} 
+                  style={{ backgroundColor: '#dc3545', color: 'white', border: 'none', padding: '5px 10px', cursor: 'pointer', borderRadius: '3px' }}
+                >
+                  Quitar
+                </button>
+              </div>
+            ) : (
+              <p style={{ margin: 0, color: '#666' }}>No has seleccionado ningún producto. Haz clic en "1. Ver Catálogo" y elige uno.</p>
+            )}
+          </div>
+
+          {/* Listado interactivo de productos al pulsar Ver Catálogo */}
+          {catalogo.length > 0 && (
+            <div style={{ marginTop: '20px' }}>
+              <h3>📦 Productos del Catálogo:</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+                {catalogo.map((prod, index) => {
+                  const nombreProd = typeof prod === 'string' ? prod : (prod.nombre || `Producto ${index + 1}`);
+                  const precioProd = prod.precio ? ` - ${prod.precio}` : '';
+                  return (
+                    <div key={index} style={{ border: '1px solid #ddd', padding: '10px', borderRadius: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff' }}>
+                      <span><strong>{nombreProd}</strong>{precioProd}</span>
+                      <button 
+                        onClick={() => setProductoSeleccionado(nombreProd)}
+                        style={{ backgroundColor: '#007bff', color: 'white', border: 'none', padding: '5px 10px', cursor: 'pointer', borderRadius: '3px' }}
+                      >
+                        Añadir al Carrito
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <h3 style={{ marginTop: '20px' }}>Respuesta de la API / Log:</h3>
           <pre style={{ background: '#f4f4f4', padding: '15px', borderRadius: '5px', overflowX: 'auto', maxHeight: '300px' }}>
             {log || 'Haz clic en algún botón para probar la integración con los microservicios...'}
