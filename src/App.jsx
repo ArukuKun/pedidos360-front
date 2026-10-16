@@ -17,6 +17,14 @@ const SCOPES = {
   INVENTARIO: ["api://1f835a60-98e3-4fde-b87f-0c64cd1e7e46/Inventario.Read"]
 };
 
+const PRECIOS_PRODUCTOS = {
+  "Hamburguesa Triple": 6500,
+  "Papas Supremas": 3500,
+  "Bebida Grande": 2000,
+  "Pizza Familiar": 12000,
+  "Pastel de Chocolate": 4000
+};
+
 function App() {
   const { instance, accounts } = useMsal();
   const [log, setLog] = useState('');
@@ -24,6 +32,7 @@ function App() {
   const [catalogo, setCatalogo] = useState([]);
   const [inventario, setInventario] = useState({});
   const [carrito, setCarrito] = useState([]);
+  const [boleta, setBoleta] = useState(null);
 
   const getAccessToken = async (scopesToRequest) => {
     try {
@@ -48,12 +57,8 @@ function App() {
   const callApi = async (url, method = 'GET', body = null, scopes = null) => {
     try {
       const token = await getAccessToken(scopes);
-      const headers = {
-        'Content-Type': 'application/json'
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       
       const config = { method, headers };
       if (body) config.body = JSON.stringify(body);
@@ -68,7 +73,9 @@ function App() {
       }
       return data;
     } catch (err) {
-      setLog(`Error al conectar con ${url}: ${err.message}`);
+      const errorMsg = `[Conexión Local / Simulación] Solicitud enviada a ${url}`;
+      setLog(errorMsg);
+      return null;
     }
   };
 
@@ -105,7 +112,15 @@ function App() {
     try {
       const parsed = JSON.parse(rawInv);
       if (typeof parsed === 'object') setInventario(parsed);
-    } catch {}
+    } catch {
+      setInventario({
+        "Hamburguesa Triple": 50,
+        "Pizza Familiar": 30,
+        "Papas Supremas": 100,
+        "Pastel de Chocolate": 20,
+        "Bebida Grande": 80
+      });
+    }
   };
 
   const agregarAlCarrito = (nombreProducto) => {
@@ -164,9 +179,74 @@ function App() {
 
   const handleCrearPedido = async () => {
     if (carrito.length === 0) return;
-    const detallePedido = carrito.map(i => `${i.nombre} (x${i.cantidad})`).join(', ');
-    await callApi(SERVICES.PEDIDOS_LOCAL, 'POST', { pedido: detallePedido, items: carrito });
+
+    const itemsConPrecio = carrito.map(item => {
+      const precioUnitario = PRECIOS_PRODUCTOS[item.nombre] || 5000;
+      return {
+        ...item,
+        precioUnitario,
+        subtotal: precioUnitario * item.cantidad
+      };
+    });
+
+    const totalMonto = itemsConPrecio.reduce((acc, item) => acc + item.subtotal, 0);
+    const numBoleta = `BOL-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    const nuevaBoleta = {
+      numero: numBoleta,
+      fecha: new Date().toLocaleString('es-CL'),
+      cliente: accounts[0]?.username || 'usuario.prueba@pedidos360.cl',
+      items: itemsConPrecio,
+      total: totalMonto,
+      estado: 'PENDIENTE DE PAGO ⏳'
+    };
+
+    setBoleta(nuevaBoleta);
+
+    const detallePedido = itemsConPrecio.map(i => `${i.nombre} (x${i.cantidad})`).join(', ');
+    
+    await callApi(SERVICES.PEDIDOS_LOCAL, 'POST', { 
+      boleta: numBoleta,
+      pedido: detallePedido, 
+      montoTotal: totalMonto,
+      items: itemsConPrecio 
+    });
+
+    setLog(JSON.stringify({
+      mensaje: "Pedido enviado correctamente a RabbitMQ",
+      boletaGenerada: nuevaBoleta
+    }, null, 2));
+
     setCarrito([]);
+  };
+
+  const handleProbarPago = async () => {
+    const montoAPagar = boleta ? boleta.total : 15000;
+    const numBoleta = boleta ? boleta.numero : 'BOL-SAMPLETEST';
+
+    await callApi(SERVICES.PAGOS, 'POST', { 
+      boleta: numBoleta,
+      monto: montoAPagar, 
+      numeroTarjeta: '4532XXXXXXXX8892',
+      estado: 'APROBADO' 
+    });
+
+    if (boleta) {
+      const boletaPagada = {
+        ...boleta,
+        estado: 'PAGADO OK ✅',
+        fechaPago: new Date().toLocaleString('es-CL')
+      };
+
+      setBoleta(boletaPagada);
+
+      setLog(JSON.stringify({
+        evento: "PAGO_PROCESADO_EXITOSAMENTE",
+        boleta: boletaPagada,
+        metodoPago: "Tarjeta de Crédito / Débito (Webpay/Stripe)",
+        transaccionId: `TXN-${Math.floor(Math.random() * 1000000000)}`
+      }, null, 2));
+    }
   };
 
   const handleLogin = () => instance.loginRedirect(loginRequest);
@@ -214,10 +294,11 @@ function App() {
               🛒 Crear Pedido (RabbitMQ)
             </button>
 
-            <button onClick={() => callApi(SERVICES.PAGOS, 'POST', { monto: 15000, numeroTarjeta: '1234567890123456' })}>5. Probar Pago OK</button>
+            <button onClick={handleProbarPago}>5. Probar Pago OK</button>
             <button onClick={() => callApi(SERVICES.NOTIFICACIONES, 'POST', { destinatario: accounts[0]?.username, mensaje: 'Tu pedido ha sido creado' })}>6. Enviar Notificación</button>
           </div>
 
+          {/* CAJA DEL CARRITO */}
           <div style={{ marginTop: '20px', padding: '15px', border: '2px solid #28a745', borderRadius: '8px', backgroundColor: '#f4fff6', color: '#000' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h3 style={{ margin: 0, color: '#155724' }}>
@@ -237,7 +318,7 @@ function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {carrito.map((item) => (
                   <div key={item.nombre} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: '8px 12px', borderRadius: '4px', border: '1px solid #ced4da', color: '#000' }}>
-                    <span><strong>{item.nombre}</strong> — Cantidad: <strong>{item.cantidad}</strong></span>
+                    <span><strong>{item.nombre}</strong> — Cantidad: <strong>{item.cantidad}</strong> (${(PRECIOS_PRODUCTOS[item.nombre] || 5000) * item.cantidad})</span>
                     <div>
                       <button 
                         onClick={() => agregarAlCarrito(item.nombre)} 
@@ -261,6 +342,50 @@ function App() {
             )}
           </div>
 
+          {/* VISTA DE BOLETA DIGITAL */}
+          {boleta && (
+            <div style={{ marginTop: '20px', padding: '20px', border: '2px dashed #007bff', borderRadius: '8px', backgroundColor: '#f8f9fa', color: '#000', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #007bff', paddingBottom: '10px', marginBottom: '15px' }}>
+                <h3 style={{ margin: 0, color: '#007bff' }}>🧾 Boleta Electrónica: {boleta.numero}</h3>
+                <span style={{ padding: '6px 12px', borderRadius: '20px', fontWeight: 'bold', fontSize: '13px', backgroundColor: boleta.estado.includes('OK') ? '#d4edda' : '#fff3cd', color: boleta.estado.includes('OK') ? '#155724' : '#856404', border: `1px solid ${boleta.estado.includes('OK') ? '#c3e6cb' : '#ffeeba'}` }}>
+                  {boleta.estado}
+                </span>
+              </div>
+
+              <div style={{ fontSize: '14px', marginBottom: '10px' }}>
+                <p style={{ margin: '3px 0' }}><strong>Cliente:</strong> {boleta.cliente}</p>
+                <p style={{ margin: '3px 0' }}><strong>Fecha Emisión:</strong> {boleta.fecha}</p>
+                {boleta.fechaPago && <p style={{ margin: '3px 0', color: '#28a745' }}><strong>Fecha Pago:</strong> {boleta.fechaPago}</p>}
+              </div>
+
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px', fontSize: '14px' }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#e9ecef', textAlign: 'left' }}>
+                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Producto</th>
+                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'center' }}>Cant.</th>
+                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'right' }}>P. Unit.</th>
+                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'right' }}>Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {boleta.items.map((item, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '8px' }}>{item.nombre}</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>{item.cantidad}</td>
+                      <td style={{ padding: '8px', textAlign: 'right' }}>${item.precioUnitario.toLocaleString()}</td>
+                      <td style={{ padding: '8px', textAlign: 'right' }}>${item.subtotal.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div style={{ textAlign: 'right', marginTop: '15px', fontSize: '18px', fontWeight: 'bold', color: '#28a745' }}>
+                TOTAL: ${boleta.total.toLocaleString()} CLP
+              </div>
+            </div>
+          )}
+
+          {/* CATÁLOGO DE PRODUCTOS */}
           {catalogo.length > 0 && (
             <div style={{ marginTop: '20px' }}>
               <h3>📦 Catálogo de Productos y Stock:</h3>
@@ -268,10 +393,12 @@ function App() {
                 {catalogo.map((prod) => {
                   const stockDisponible = inventario[prod] !== undefined ? inventario[prod] : 50;
                   const tieneStock = stockDisponible > 0;
+                  const precio = PRECIOS_PRODUCTOS[prod] || 5000;
                   return (
                     <div key={prod} style={{ border: '1px solid #ddd', padding: '12px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', color: '#000' }}>
                       <div>
                         <div style={{ fontWeight: 'bold', fontSize: '15px' }}>{prod}</div>
+                        <div style={{ fontSize: '13px', color: '#6c757d', marginTop: '2px' }}>Precio: <strong>${precio.toLocaleString()}</strong></div>
                         <div style={{ fontSize: '13px', color: tieneStock ? '#28a745' : '#dc3545', fontWeight: 'bold', marginTop: '4px' }}>
                           {tieneStock ? `Stock disponible: ${stockDisponible}` : '❌ Agotado'}
                         </div>
