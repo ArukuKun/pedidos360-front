@@ -25,6 +25,11 @@ function App() {
   const [inventario, setInventario] = useState({});
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
 
+  // Estados para agregar un nuevo producto con stock
+  const [nuevoNombre, setNuevoNombre] = useState('');
+  const [nuevoPrecio, setNuevoPrecio] = useState('');
+  const [nuevoStock, setNuevoStock] = useState('');
+
   const getAccessToken = async (scopesToRequest) => {
     try {
       const response = await instance.acquireTokenSilent({
@@ -64,30 +69,89 @@ function App() {
     }
   };
 
+  const normalizarProductos = (lista) => {
+    return lista.map((p, idx) => ({
+      id: p.id || idx + 1,
+      nombre: typeof p === 'string' ? p : (p.nombre || `Producto ${idx + 1}`),
+      precio: p.precio || '$20.000',
+      stock: p.stock !== undefined ? Number(p.stock) : 5
+    }));
+  };
+
   const handleVerCatalogo = async () => {
     const rawData = await callApi(SERVICES.CATALOGO, 'GET', null, SCOPES.CATALOGO);
+    const mockCatalogo = [
+      { id: 1, nombre: 'Teclado Mecánico RGB', precio: '$45.000', stock: 5 },
+      { id: 2, nombre: 'Mouse Gamer 16000 DPI', precio: '$25.000', stock: 3 },
+      { id: 3, nombre: 'Monitor 144Hz 24"', precio: '$180.000', stock: 2 },
+      { id: 4, nombre: 'Audífonos 7.1 Surround', precio: '$35.000', stock: 0 }
+    ];
+
     try {
       const parsed = JSON.parse(rawData);
-      if (Array.isArray(parsed)) {
-        setCatalogo(parsed);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setCatalogo(normalizarProductos(parsed));
       } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.productos)) {
-        setCatalogo(parsed.productos);
+        setCatalogo(normalizarProductos(parsed.productos));
       } else {
-        // Datos de respaldo en caso de que la API retorne texto plano o un objeto simple
-        setCatalogo([
-          { id: 1, nombre: 'Teclado Mecánico RGB', precio: '$45.000' },
-          { id: 2, nombre: 'Mouse Gamer 16000 DPI', precio: '$25.000' },
-          { id: 3, nombre: 'Monitor 144Hz 24"', precio: '$180.000' },
-          { id: 4, nombre: 'Audífonos 7.1 Surround', precio: '$35.000' }
-        ]);
+        setCatalogo(mockCatalogo);
       }
     } catch {
-      setCatalogo([
-        { id: 1, nombre: 'Teclado Mecánico RGB', precio: '$45.000' },
-        { id: 2, nombre: 'Mouse Gamer 16000 DPI', precio: '$25.000' },
-        { id: 3, nombre: 'Monitor 144Hz 24"', precio: '$180.000' },
-        { id: 4, nombre: 'Audífonos 7.1 Surround', precio: '$35.000' }
-      ]);
+      setCatalogo(mockCatalogo);
+    }
+  };
+
+  const handleAgregarProducto = async (e) => {
+    e.preventDefault();
+    if (!nuevoNombre.trim() || !nuevoPrecio.trim()) return;
+
+    const stockNum = parseInt(nuevoStock, 10);
+    const nuevoProd = {
+      id: Date.now(),
+      nombre: nuevoNombre,
+      precio: nuevoPrecio.startsWith('$') ? nuevoPrecio : `$${nuevoPrecio}`,
+      stock: isNaN(stockNum) ? 10 : stockNum
+    };
+
+    // Envía la petición POST al microservicio de Catálogo
+    await callApi(SERVICES.CATALOGO, 'POST', nuevoProd, SCOPES.CATALOGO);
+
+    // Añade el producto al listado local
+    setCatalogo(prev => [...prev, nuevoProd]);
+
+    // Limpia los inputs del formulario
+    setNuevoNombre('');
+    setNuevoPrecio('');
+    setNuevoStock('');
+  };
+
+  const handleCrearPedido = async () => {
+    if (!productoSeleccionado) return;
+
+    const prodEnCatalogo = catalogo.find(p => p.nombre === productoSeleccionado.nombre);
+
+    if (prodEnCatalogo && prodEnCatalogo.stock <= 0) {
+      setLog('⚠️ Error: El producto seleccionado no tiene stock disponible.');
+      return;
+    }
+
+    // 1. Petición POST al backend local (RabbitMQ)
+    await callApi(SERVICES.PEDIDOS_LOCAL, 'POST', productoSeleccionado.nombre);
+
+    // 2. Descontar 1 unidad del stock localmente
+    setCatalogo(prev => prev.map(item => {
+      if (item.nombre === productoSeleccionado.nombre) {
+        const stockActualizado = item.stock - 1;
+        return { ...item, stock: stockActualizado > 0 ? stockActualizado : 0 };
+      }
+      return item;
+    }));
+
+    // 3. Actualizar la selección actual o quitarla si ya no hay stock
+    if (prodEnCatalogo && prodEnCatalogo.stock - 1 <= 0) {
+      setProductoSeleccionado(null);
+    } else {
+      setProductoSeleccionado(prev => prev ? { ...prev, stock: prev.stock - 1 } : null);
     }
   };
 
@@ -119,13 +183,13 @@ function App() {
             <button onClick={() => callApi(SERVICES.PEDIDOS_LOCAL)}>4. Consultar Pedidos</button>
             
             <button 
-              onClick={() => callApi(SERVICES.PEDIDOS_LOCAL, 'POST', productoSeleccionado)}
-              disabled={!productoSeleccionado}
+              onClick={handleCrearPedido}
+              disabled={!productoSeleccionado || productoSeleccionado.stock <= 0}
               style={{ 
-                backgroundColor: productoSeleccionado ? '#28a745' : '#6c757d', 
+                backgroundColor: (productoSeleccionado && productoSeleccionado.stock > 0) ? '#28a745' : '#6c757d', 
                 color: 'white', 
                 fontWeight: 'bold',
-                cursor: productoSeleccionado ? 'pointer' : 'not-allowed'
+                cursor: (productoSeleccionado && productoSeleccionado.stock > 0) ? 'pointer' : 'not-allowed'
               }}
             >
               🛒 Crear Pedido (RabbitMQ)
@@ -135,12 +199,17 @@ function App() {
             <button onClick={() => callApi(SERVICES.NOTIFICACIONES, 'POST', { destinatario: accounts[0]?.username, mensaje: 'Tu pedido ha sido creado' })}>6. Enviar Notificación</button>
           </div>
 
-          {/* Sección de Carrito / Producto Seleccionado */}
+          {/* Sección Carrito / Producto Seleccionado */}
           <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #007bff', borderRadius: '5px', backgroundColor: '#e9f5ff' }}>
             <h3 style={{ margin: '0 0 10px 0' }}>🛒 Carrito / Producto Seleccionado:</h3>
             {productoSeleccionado ? (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span><strong>{productoSeleccionado}</strong> listo para enviar al backend local.</span>
+                <div>
+                  <strong>{productoSeleccionado.nombre}</strong> ({productoSeleccionado.precio})
+                  <span style={{ marginLeft: '10px', fontSize: '13px', color: '#28a745', fontWeight: 'bold' }}>
+                    [Stock disponible: {productoSeleccionado.stock}]
+                  </span>
+                </div>
                 <button 
                   onClick={() => setProductoSeleccionado(null)} 
                   style={{ backgroundColor: '#dc3545', color: 'white', border: 'none', padding: '5px 10px', cursor: 'pointer', borderRadius: '3px' }}
@@ -149,27 +218,73 @@ function App() {
                 </button>
               </div>
             ) : (
-              <p style={{ margin: 0, color: '#666' }}>No has seleccionado ningún producto. Haz clic en "1. Ver Catálogo" y elige uno.</p>
+              <p style={{ margin: 0, color: '#666' }}>No has seleccionado ningún producto. Haz clic en "1. Ver Catálogo" y elige uno con stock disponible.</p>
             )}
           </div>
 
-          {/* Listado interactivo de productos al pulsar Ver Catálogo */}
+          {/* Listado de Productos y Formulario */}
           {catalogo.length > 0 && (
             <div style={{ marginTop: '20px' }}>
               <h3>📦 Productos del Catálogo:</h3>
+              
+              <form onSubmit={handleAgregarProducto} style={{ display: 'flex', gap: '10px', marginBottom: '15px', backgroundColor: '#f8f9fa', padding: '10px', borderRadius: '5px', border: '1px solid #ddd' }}>
+                <input 
+                  type="text" 
+                  placeholder="Nombre del producto" 
+                  value={nuevoNombre} 
+                  onChange={(e) => setNuevoNombre(e.target.value)}
+                  style={{ flex: 2, padding: '8px' }}
+                  required
+                />
+                <input 
+                  type="text" 
+                  placeholder="Precio (ej: 50.000)" 
+                  value={nuevoPrecio} 
+                  onChange={(e) => setNuevoPrecio(e.target.value)}
+                  style={{ flex: 1, padding: '8px' }}
+                  required
+                />
+                <input 
+                  type="number" 
+                  placeholder="Stock (ej: 10)" 
+                  value={nuevoStock} 
+                  onChange={(e) => setNuevoStock(e.target.value)}
+                  style={{ width: '100px', padding: '8px' }}
+                  min="1"
+                  required
+                />
+                <button type="submit" style={{ backgroundColor: '#17a2b8', color: 'white', border: 'none', padding: '8px 15px', cursor: 'pointer', borderRadius: '3px', fontWeight: 'bold' }}>
+                  ➕ Añadir al Catálogo
+                </button>
+              </form>
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
-                {catalogo.map((prod, index) => {
-                  const nombreProd = typeof prod === 'string' ? prod : (prod.nombre || `Producto ${index + 1}`);
-                  const precioProd = prod.precio ? ` - ${prod.precio}` : '';
+                {catalogo.map((prod) => {
+                  const tieneStock = prod.stock > 0;
                   return (
-                    <div key={index} style={{ border: '1px solid #ddd', padding: '10px', borderRadius: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff' }}>
-                      <span><strong>{nombreProd}</strong>{precioProd}</span>
-                      <button 
-                        onClick={() => setProductoSeleccionado(nombreProd)}
-                        style={{ backgroundColor: '#007bff', color: 'white', border: 'none', padding: '5px 10px', cursor: 'pointer', borderRadius: '3px' }}
-                      >
-                        Añadir al Carrito
-                      </button>
+                    <div key={prod.id} style={{ border: '1px solid #ddd', padding: '12px', borderRadius: '5px', display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: '#fff' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span><strong>{prod.nombre}</strong> - {prod.precio}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '13px', color: tieneStock ? '#28a745' : '#dc3545', fontWeight: 'bold' }}>
+                          {tieneStock ? `Stock: ${prod.stock} un.` : '❌ Sin Stock'}
+                        </span>
+                        <button 
+                          onClick={() => setProductoSeleccionado(prod)}
+                          disabled={!tieneStock}
+                          style={{ 
+                            backgroundColor: tieneStock ? '#007bff' : '#6c757d', 
+                            color: 'white', 
+                            border: 'none', 
+                            padding: '5px 10px', 
+                            cursor: tieneStock ? 'pointer' : 'not-allowed', 
+                            borderRadius: '3px' 
+                          }}
+                        >
+                          {tieneStock ? 'Añadir al Carrito' : 'Agotado'}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
