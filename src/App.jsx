@@ -456,21 +456,8 @@ function App() {
                 </tbody>
               </table>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
-                <div>
-                  {boleta.notificacionEnviada ? (
-                    <button disabled style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px', fontWeight: 'bold', cursor: 'default' }}>
-                      ✅ Enviado
-                    </button>
-                  ) : (
-                    <button onClick={() => handleEnviarNotificacionPedido(boleta)} style={{ backgroundColor: '#17a2b8', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
-                      📩 Enviar Notificación de Compra
-                    </button>
-                  )}
-                </div>
-                <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#28a745' }}>
-                  TOTAL: ${boleta.total.toLocaleString()} CLP
-                </div>
+              <div style={{ textAlign: 'right', marginTop: '15px', fontSize: '18px', fontWeight: 'bold', color: '#28a745' }}>
+                TOTAL: ${boleta.total.toLocaleString()} CLP
               </div>
             </div>
           )}
