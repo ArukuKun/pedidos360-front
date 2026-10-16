@@ -30,6 +30,10 @@ function App() {
   const { instance, accounts } = useMsal();
   const [log, setLog] = useState('');
   
+  // Estado de navegación
+  const [vistaActiva, setVistaActiva] = useState('catalogo');
+
+  // Estados del Negocio
   const [catalogo, setCatalogo] = useState([]);
   const [inventario, setInventario] = useState({});
   const [carrito, setCarrito] = useState([]);
@@ -82,6 +86,7 @@ function App() {
   };
 
   const handleVerCatalogo = async () => {
+    setVistaActiva('catalogo');
     const rawCat = await callApi(SERVICES.CATALOGO, 'GET', null, SCOPES.CATALOGO);
     let catList = [];
     try {
@@ -110,6 +115,7 @@ function App() {
   };
 
   const handleVerInventario = async () => {
+    setVistaActiva('inventario');
     const rawInv = await callApi(SERVICES.INVENTARIO, 'GET', null, SCOPES.INVENTARIO);
     try {
       const parsed = JSON.parse(rawInv);
@@ -125,58 +131,32 @@ function App() {
     }
   };
 
-  const agregarAlCarrito = (nombreProducto) => {
-    const stockActual = inventario[nombreProducto] !== undefined ? inventario[nombreProducto] : 50;
-    if (stockActual <= 0) return;
-
-    setInventario(prev => ({
-      ...prev,
-      [nombreProducto]: (prev[nombreProducto] !== undefined ? prev[nombreProducto] : 50) - 1
-    }));
-
-    setCarrito(prev => {
-      const existe = prev.find(item => item.nombre === nombreProducto);
-      if (existe) {
-        return prev.map(item =>
-          item.nombre === nombreProducto
-            ? { ...item, cantidad: item.cantidad + 1 }
-            : item
-        );
-      }
-      return [...prev, { nombre: nombreProducto, cantidad: 1 }];
-    });
+  const handleVerPerfil = async () => {
+    setVistaActiva('perfil');
+    await callApi(SERVICES.USUARIOS);
   };
 
-  const quitarDelCarrito = (nombreProducto) => {
-    const itemEnCarrito = carrito.find(item => item.nombre === nombreProducto);
-    if (!itemEnCarrito) return;
+  const handleConsultarPedidos = async () => {
+    setVistaActiva('pedidos');
+    const rawData = await callApi(SERVICES.PEDIDOS_LOCAL, 'GET');
+    let apiPedidos = null;
+    try {
+      apiPedidos = JSON.parse(rawData);
+    } catch {}
 
-    setInventario(prev => ({
-      ...prev,
-      [nombreProducto]: (prev[nombreProducto] || 0) + 1
-    }));
-
-    setCarrito(prev => {
-      if (itemEnCarrito.cantidad > 1) {
-        return prev.map(item =>
-          item.nombre === nombreProducto
-            ? { ...item, cantidad: item.cantidad - 1 }
-            : item
-        );
-      }
-      return prev.filter(item => item.nombre !== nombreProducto);
-    });
-  };
-
-  const vaciarCarrito = () => {
-    setInventario(prev => {
-      const nuevoInv = { ...prev };
-      carrito.forEach(item => {
-        nuevoInv[item.nombre] = (nuevoInv[item.nombre] || 0) + item.cantidad;
-      });
-      return nuevoInv;
-    });
-    setCarrito([]);
+    if (Array.isArray(apiPedidos) && apiPedidos.length > 0) {
+      setLog(JSON.stringify(apiPedidos, null, 2));
+    } else if (pedidosHistorial.length > 0) {
+      setLog(JSON.stringify({
+        totalPedidosRegistrados: pedidosHistorial.length,
+        pedidos: pedidosHistorial
+      }, null, 2));
+    } else {
+      setLog(JSON.stringify({
+        mensaje: "No hay pedidos registrados en el sistema.",
+        pedidos: []
+      }, null, 2));
+    }
   };
 
   const handleCrearPedido = async () => {
@@ -207,6 +187,7 @@ function App() {
 
     setBoleta(nuevaBoleta);
     setPedidosHistorial(prev => [nuevaBoleta, ...prev]);
+    setVistaActiva('boleta');
 
     const detallePedido = itemsConPrecio.map(i => `${i.nombre} (x${i.cantidad})`).join(', ');
     
@@ -225,30 +206,8 @@ function App() {
     setCarrito([]);
   };
 
-  const handleConsultarPedidos = async () => {
-    const rawData = await callApi(SERVICES.PEDIDOS_LOCAL, 'GET');
-    
-    let apiPedidos = null;
-    try {
-      apiPedidos = JSON.parse(rawData);
-    } catch {}
-
-    if (Array.isArray(apiPedidos) && apiPedidos.length > 0) {
-      setLog(JSON.stringify(apiPedidos, null, 2));
-    } else if (pedidosHistorial.length > 0) {
-      setLog(JSON.stringify({
-        totalPedidosRegistrados: pedidosHistorial.length,
-        pedidos: pedidosHistorial
-      }, null, 2));
-    } else {
-      setLog(JSON.stringify({
-        mensaje: "No hay pedidos registrados en el sistema.",
-        pedidos: []
-      }, null, 2));
-    }
-  };
-
   const handleProbarPago = async () => {
+    setVistaActiva('boleta');
     const montoAPagar = boleta ? boleta.total : 15000;
     const numBoleta = boleta ? boleta.numero : 'BOL-SAMPLETEST';
 
@@ -314,15 +273,68 @@ function App() {
     }, null, 2));
   };
 
-  const handleNotificarUltimoPedidoOGenerico = () => {
-    if (pedidosHistorial.length > 0) {
-      handleEnviarNotificacionPedido(pedidosHistorial[0]);
-    } else {
+  const handleBotonMenuNotificaciones = () => {
+    setVistaActiva('notificaciones');
+    if (pedidosHistorial.length === 0) {
       callApi(SERVICES.NOTIFICACIONES, 'POST', { 
         destinatario: accounts[0]?.username || 'usuario.prueba@pedidos360.cl', 
         mensaje: 'Tu compra ha sido realizada exitosamente en Pedidos360.' 
       });
     }
+  };
+
+  const agregarAlCarrito = (nombreProducto) => {
+    const stockActual = inventario[nombreProducto] !== undefined ? inventario[nombreProducto] : 50;
+    if (stockActual <= 0) return;
+
+    setInventario(prev => ({
+      ...prev,
+      [nombreProducto]: (prev[nombreProducto] !== undefined ? prev[nombreProducto] : 50) - 1
+    }));
+
+    setCarrito(prev => {
+      const existe = prev.find(item => item.nombre === nombreProducto);
+      if (existe) {
+        return prev.map(item =>
+          item.nombre === nombreProducto
+            ? { ...item, cantidad: item.cantidad + 1 }
+            : item
+        );
+      }
+      return [...prev, { nombre: nombreProducto, cantidad: 1 }];
+    });
+  };
+
+  const quitarDelCarrito = (nombreProducto) => {
+    const itemEnCarrito = carrito.find(item => item.nombre === nombreProducto);
+    if (!itemEnCarrito) return;
+
+    setInventario(prev => ({
+      ...prev,
+      [nombreProducto]: (prev[nombreProducto] || 0) + 1
+    }));
+
+    setCarrito(prev => {
+      if (itemEnCarrito.cantidad > 1) {
+        return prev.map(item =>
+          item.nombre === nombreProducto
+            ? { ...item, cantidad: item.cantidad - 1 }
+            : item
+        );
+      }
+      return prev.filter(item => item.nombre !== nombreProducto);
+    });
+  };
+
+  const vaciarCarrito = () => {
+    setInventario(prev => {
+      const nuevoInv = { ...prev };
+      carrito.forEach(item => {
+        nuevoInv[item.nombre] = (nuevoInv[item.nombre] || 0) + item.cantidad;
+      });
+      return nuevoInv;
+    });
+    setCarrito([]);
   };
 
   const handleLogin = () => instance.loginRedirect(loginRequest);
@@ -351,11 +363,33 @@ function App() {
 
         <main style={{ marginTop: '20px' }}>
           <h2>Prueba de Microservicios</h2>
+          
+          {/* BOTONES DE SERVICIOS - NAVEGACIÓN DE PESTAÑAS */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-            <button onClick={handleVerCatalogo}>1. Ver Catálogo</button>
-            <button onClick={handleVerInventario}>2. Ver Inventario</button>
-            <button onClick={() => callApi(SERVICES.USUARIOS)}>3. Ver Perfil Usuario</button>
-            <button onClick={handleConsultarPedidos}>4. Consultar Pedidos</button>
+            <button 
+              onClick={handleVerCatalogo}
+              style={{ backgroundColor: vistaActiva === 'catalogo' ? '#007bff' : '#f8f9fa', color: vistaActiva === 'catalogo' ? 'white' : 'black', fontWeight: 'bold' }}
+            >
+              1. Ver Catálogo
+            </button>
+            <button 
+              onClick={handleVerInventario}
+              style={{ backgroundColor: vistaActiva === 'inventario' ? '#007bff' : '#f8f9fa', color: vistaActiva === 'inventario' ? 'white' : 'black', fontWeight: 'bold' }}
+            >
+              2. Ver Inventario
+            </button>
+            <button 
+              onClick={handleVerPerfil}
+              style={{ backgroundColor: vistaActiva === 'perfil' ? '#007bff' : '#f8f9fa', color: vistaActiva === 'perfil' ? 'white' : 'black', fontWeight: 'bold' }}
+            >
+              3. Ver Perfil Usuario
+            </button>
+            <button 
+              onClick={handleConsultarPedidos}
+              style={{ backgroundColor: vistaActiva === 'pedidos' ? '#007bff' : '#f8f9fa', color: vistaActiva === 'pedidos' ? 'white' : 'black', fontWeight: 'bold' }}
+            >
+              4. Consultar Pedidos
+            </button>
             
             <button 
               onClick={handleCrearPedido}
@@ -370,11 +404,22 @@ function App() {
               🛒 Crear Pedido (RabbitMQ)
             </button>
 
-            <button onClick={handleProbarPago} style={{ backgroundColor: '#007bff', color: 'white', fontWeight: 'bold' }}>5. Pagar</button>
-            <button onClick={handleNotificarUltimoPedidoOGenerico}>6. Enviar Notificación</button>
+            <button 
+              onClick={handleProbarPago} 
+              style={{ backgroundColor: vistaActiva === 'boleta' ? '#28a745' : '#007bff', color: 'white', fontWeight: 'bold' }}
+            >
+              5. Pagar
+            </button>
+
+            <button 
+              onClick={handleBotonMenuNotificaciones}
+              style={{ backgroundColor: vistaActiva === 'notificaciones' ? '#007bff' : '#f8f9fa', color: vistaActiva === 'notificaciones' ? 'white' : 'black', fontWeight: 'bold' }}
+            >
+              6. Enviar Notificación
+            </button>
           </div>
 
-          {/* CAJA DEL CARRITO */}
+          {/* CAJA DE CARRITO DE COMPRAS */}
           <div style={{ marginTop: '20px', padding: '15px', border: '2px solid #28a745', borderRadius: '8px', backgroundColor: '#f4fff6', color: '#000' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h3 style={{ margin: 0, color: '#155724' }}>
@@ -414,101 +459,16 @@ function App() {
                 ))}
               </div>
             ) : (
-              <p style={{ margin: 0, color: '#6c757d' }}>El carrito está vacío. Haz clic en "1. Ver Catálogo" y añade productos.</p>
+              <p style={{ margin: 0, color: '#6c757d' }}>El carrito está vacío. Revisa el catálogo para añadir productos.</p>
             )}
           </div>
 
-          {/* VISTA DE BOLETA DIGITAL ACTUAL */}
-          {boleta && (
-            <div style={{ marginTop: '20px', padding: '20px', border: '2px dashed #007bff', borderRadius: '8px', backgroundColor: '#f8f9fa', color: '#000', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #007bff', paddingBottom: '10px', marginBottom: '15px' }}>
-                <h3 style={{ margin: 0, color: '#007bff' }}>🧾 Última Boleta Generada: {boleta.numero}</h3>
-                <span style={{ padding: '6px 12px', borderRadius: '20px', fontWeight: 'bold', fontSize: '13px', backgroundColor: boleta.estado.includes('OK') ? '#d4edda' : '#fff3cd', color: boleta.estado.includes('OK') ? '#155724' : '#856404', border: `1px solid ${boleta.estado.includes('OK') ? '#c3e6cb' : '#ffeeba'}` }}>
-                  {boleta.estado}
-                </span>
-              </div>
-
-              <div style={{ fontSize: '14px', marginBottom: '10px' }}>
-                <p style={{ margin: '3px 0' }}><strong>ID Pedido:</strong> {boleta.idPedido}</p>
-                <p style={{ margin: '3px 0' }}><strong>Cliente:</strong> {boleta.cliente}</p>
-                <p style={{ margin: '3px 0' }}><strong>Fecha Emisión:</strong> {boleta.fecha}</p>
-                {boleta.fechaPago && <p style={{ margin: '3px 0', color: '#28a745' }}><strong>Fecha Pago:</strong> {boleta.fechaPago}</p>}
-              </div>
-
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px', fontSize: '14px' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#e9ecef', textAlign: 'left' }}>
-                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Producto</th>
-                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'center' }}>Cant.</th>
-                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'right' }}>P. Unit.</th>
-                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'right' }}>Subtotal</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {boleta.items.map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={{ padding: '8px' }}>{item.nombre}</td>
-                      <td style={{ padding: '8px', textAlign: 'center' }}>{item.cantidad}</td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>${item.precioUnitario.toLocaleString()}</td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>${item.subtotal.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <div style={{ textAlign: 'right', marginTop: '15px', fontSize: '18px', fontWeight: 'bold', color: '#28a745' }}>
-                TOTAL: ${boleta.total.toLocaleString()} CLP
-              </div>
-            </div>
-          )}
-
-          {/* SECCIÓN DE NOTIFICACIONES Y TODOS LOS PEDIDOS REALIZADOS */}
-          {pedidosHistorial.length > 0 && (
-            <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #17a2b8', borderRadius: '8px', backgroundColor: '#ffffff', color: '#000' }}>
-              <h3 style={{ margin: '0 0 15px 0', color: '#117a8b' }}>📩 Enviar Notificación — Lista de Todos los Pedidos ({pedidosHistorial.length})</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {pedidosHistorial.map((ped) => (
-                  <div key={ped.numero} style={{ padding: '14px', border: '1px solid #dee2e6', borderRadius: '6px', backgroundColor: '#f8f9fa' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <div>
-                        <strong>{ped.numero}</strong> ({ped.idPedido}) — <small style={{ color: '#6c757d' }}>{ped.fecha}</small>
-                      </div>
-                      <span style={{ fontSize: '12px', padding: '3px 8px', borderRadius: '12px', fontWeight: 'bold', backgroundColor: ped.estado.includes('OK') ? '#d4edda' : '#fff3cd', color: ped.estado.includes('OK') ? '#155724' : '#856404' }}>
-                        {ped.estado}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '13px', color: '#495057', marginBottom: '10px' }}>
-                      <strong>Productos:</strong> {ped.items.map(i => `${i.nombre} (x${i.cantidad})`).join(', ')}
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      {ped.notificacionEnviada ? (
-                        <button disabled style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '4px', fontWeight: 'bold', cursor: 'default' }}>
-                          ✅ Enviado
-                        </button>
-                      ) : (
-                        <button onClick={() => handleEnviarNotificacionPedido(ped)} style={{ backgroundColor: '#17a2b8', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
-                          📩 Enviar Notificación
-                        </button>
-                      )}
-
-                      <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#28a745' }}>
-                        Monto: ${ped.total.toLocaleString()} CLP
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* CATÁLOGO DE PRODUCTOS */}
-          {catalogo.length > 0 && (
+          {/* VISTA INDIVIDUAL 1: CATÁLOGO */}
+          {vistaActiva === 'catalogo' && (
             <div style={{ marginTop: '20px' }}>
               <h3>📦 Catálogo de Productos y Stock:</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
-                {catalogo.map((prod) => {
+                {(catalogo.length > 0 ? catalogo : ["Hamburguesa Triple", "Papas Supremas", "Bebida Grande", "Pizza Familiar", "Pastel de Chocolate"]).map((prod) => {
                   const stockDisponible = inventario[prod] !== undefined ? inventario[prod] : 50;
                   const tieneStock = stockDisponible > 0;
                   const precio = PRECIOS_PRODUCTOS[prod] || 5000;
@@ -543,8 +503,162 @@ function App() {
             </div>
           )}
 
+          {/* VISTA INDIVIDUAL 2: INVENTARIO */}
+          {vistaActiva === 'inventario' && (
+            <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #007bff', borderRadius: '8px', backgroundColor: '#fff' }}>
+              <h3>📊 Control de Inventario en Tiempo Real</h3>
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#f1f3f5', textAlign: 'left' }}>
+                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Producto</th>
+                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'center' }}>Stock Disponible</th>
+                    <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'center' }}>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(inventario.length ? inventario : { "Hamburguesa Triple": 50, "Pizza Familiar": 30, "Papas Supremas": 100, "Pastel de Chocolate": 20, "Bebida Grande": 80 }).map(([prod, stock]) => (
+                    <tr key={prod} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '8px' }}><strong>{prod}</strong></td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>{stock} unidades</td>
+                      <td style={{ padding: '8px', textAlign: 'center', color: stock > 0 ? '#28a745' : '#dc3545', fontWeight: 'bold' }}>
+                        {stock > 0 ? 'Disponible' : 'Sin Stock'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* VISTA INDIVIDUAL 3: BOLETA Y PAGO */}
+          {vistaActiva === 'boleta' && (
+            <div>
+              {boleta ? (
+                <div style={{ marginTop: '20px', padding: '20px', border: '2px dashed #007bff', borderRadius: '8px', backgroundColor: '#f8f9fa', color: '#000', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #007bff', paddingBottom: '10px', marginBottom: '15px' }}>
+                    <h3 style={{ margin: 0, color: '#007bff' }}>🧾 Boleta Digital: {boleta.numero}</h3>
+                    <span style={{ padding: '6px 12px', borderRadius: '20px', fontWeight: 'bold', fontSize: '13px', backgroundColor: boleta.estado.includes('OK') ? '#d4edda' : '#fff3cd', color: boleta.estado.includes('OK') ? '#155724' : '#856404', border: `1px solid ${boleta.estado.includes('OK') ? '#c3e6cb' : '#ffeeba'}` }}>
+                      {boleta.estado}
+                    </span>
+                  </div>
+
+                  <div style={{ fontSize: '14px', marginBottom: '10px' }}>
+                    <p style={{ margin: '3px 0' }}><strong>ID Pedido:</strong> {boleta.idPedido}</p>
+                    <p style={{ margin: '3px 0' }}><strong>Cliente:</strong> {boleta.cliente}</p>
+                    <p style={{ margin: '3px 0' }}><strong>Fecha Emisión:</strong> {boleta.fecha}</p>
+                    {boleta.fechaPago && <p style={{ margin: '3px 0', color: '#28a745' }}><strong>Fecha Pago:</strong> {boleta.fechaPago}</p>}
+                  </div>
+
+                  <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px', fontSize: '14px' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#e9ecef', textAlign: 'left' }}>
+                        <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Producto</th>
+                        <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'center' }}>Cant.</th>
+                        <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'right' }}>P. Unit.</th>
+                        <th style={{ padding: '8px', borderBottom: '1px solid #ddd', textAlign: 'right' }}>Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {boleta.items.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                          <td style={{ padding: '8px' }}>{item.nombre}</td>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>{item.cantidad}</td>
+                          <td style={{ padding: '8px', textAlign: 'right' }}>${item.precioUnitario.toLocaleString()}</td>
+                          <td style={{ padding: '8px', textAlign: 'right' }}>${item.subtotal.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <div style={{ textAlign: 'right', marginTop: '15px', fontSize: '18px', fontWeight: 'bold', color: '#28a745' }}>
+                    TOTAL: ${boleta.total.toLocaleString()} CLP
+                  </div>
+                </div>
+              ) : (
+                <p style={{ marginTop: '20px', color: '#6c757d' }}>No hay boleta activa. Añade productos al carrito y presiona "🛒 Crear Pedido (RabbitMQ)".</p>
+              )}
+            </div>
+          )}
+
+          {/* VISTA INDIVIDUAL 4: CONSULTAR PEDIDOS / HISTORIAL */}
+          {vistaActiva === 'pedidos' && (
+            <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #6c757d', borderRadius: '8px', backgroundColor: '#ffffff', color: '#000' }}>
+              <h3 style={{ margin: '0 0 15px 0', color: '#343a40' }}>📋 Historial de Pedidos Realizados ({pedidosHistorial.length})</h3>
+              {pedidosHistorial.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {pedidosHistorial.map((ped) => (
+                    <div key={ped.numero} style={{ padding: '12px', border: '1px solid #dee2e6', borderRadius: '6px', backgroundColor: '#f8f9fa' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div>
+                          <strong>{ped.numero}</strong> ({ped.idPedido}) — <small style={{ color: '#6c757d' }}>{ped.fecha}</small>
+                        </div>
+                        <span style={{ fontSize: '12px', padding: '3px 8px', borderRadius: '12px', fontWeight: 'bold', backgroundColor: ped.estado.includes('OK') ? '#d4edda' : '#fff3cd', color: ped.estado.includes('OK') ? '#155724' : '#856404' }}>
+                          {ped.estado}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#495057' }}>
+                        <strong>Detalle:</strong> {ped.items.map(i => `${i.nombre} (x${i.cantidad})`).join(', ')}
+                      </div>
+                      <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#28a745', marginTop: '5px', textAlign: 'right' }}>
+                        Monto: ${ped.total.toLocaleString()} CLP
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ margin: 0, color: '#6c757d' }}>Aún no se han realizado pedidos en esta sesión.</p>
+              )}
+            </div>
+          )}
+
+          {/* VISTA INDIVIDUAL 6: NOTIFICACIONES */}
+          {vistaActiva === 'notificaciones' && (
+            <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #17a2b8', borderRadius: '8px', backgroundColor: '#ffffff', color: '#000' }}>
+              <h3 style={{ margin: '0 0 15px 0', color: '#117a8b' }}>📩 Enviar Notificación — Lista de Pedidos ({pedidosHistorial.length})</h3>
+              {pedidosHistorial.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {pedidosHistorial.map((ped) => (
+                    <div key={ped.numero} style={{ padding: '14px', border: '1px solid #dee2e6', borderRadius: '6px', backgroundColor: '#f8f9fa' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div>
+                          <strong>{ped.numero}</strong> ({ped.idPedido}) — <small style={{ color: '#6c757d' }}>{ped.fecha}</small>
+                        </div>
+                        <span style={{ fontSize: '12px', padding: '3px 8px', borderRadius: '12px', fontWeight: 'bold', backgroundColor: ped.estado.includes('OK') ? '#d4edda' : '#fff3cd', color: ped.estado.includes('OK') ? '#155724' : '#856404' }}>
+                          {ped.estado}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '13px', color: '#495057', marginBottom: '10px' }}>
+                        <strong>Productos:</strong> {ped.items.map(i => `${i.nombre} (x${i.cantidad})`).join(', ')}
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        {ped.notificacionEnviada ? (
+                          <button disabled style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '4px', fontWeight: 'bold', cursor: 'default' }}>
+                            ✅ Enviado
+                          </button>
+                        ) : (
+                          <button onClick={() => handleEnviarNotificacionPedido(ped)} style={{ backgroundColor: '#17a2b8', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
+                            📩 Enviar Notificación
+                          </button>
+                        )}
+
+                        <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#28a745' }}>
+                          Monto: ${ped.total.toLocaleString()} CLP
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ margin: 0, color: '#6c757d' }}>No hay pedidos registrados para notificar.</p>
+              )}
+            </div>
+          )}
+
+          {/* CONSOLA DE LOGS / RESPUESTA DE API */}
           <h3 style={{ marginTop: '20px' }}>Respuesta de la API / Log:</h3>
-          <pre style={{ background: '#f4f4f4', color: '#000', padding: '15px', borderRadius: '5px', overflowX: 'auto', maxHeight: '300px' }}>
+          <pre style={{ background: '#f4f4f4', color: '#000', padding: '15px', borderRadius: '5px', overflowX: 'auto', maxHeight: '250px' }}>
             {log || 'Haz clic en algún botón para probar la integración con los microservicios...'}
           </pre>
         </main>
