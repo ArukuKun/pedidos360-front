@@ -6,7 +6,7 @@ import './App.css';
 const SERVICES = {
   CATALOGO: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/catalogo',
   INVENTARIO: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/inventario',
-  PEDIDOS_LOCAL: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/pedidos', // ¡Corregido!
+  PEDIDOS_LOCAL: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/pedidos',
   PEDIDOS: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/pedidos',
   USUARIOS: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/usuarios/perfil',
   PAGOS: 'https://j76lk49uq2.execute-api.us-east-1.amazonaws.com/v1/pagos/procesar',
@@ -15,7 +15,8 @@ const SERVICES = {
 
 const SCOPES = {
   CATALOGO: ["api://5d7ead55-12ca-4dcd-97e8-5b5e81f77f4b/Catalogo.Read"],
-  INVENTARIO: ["api://1f835a60-98e3-4fde-b87f-0c64cd1e7e46/Inventario.Read"]
+  INVENTARIO: ["api://1f835a60-98e3-4fde-b87f-0c64cd1e7e46/Inventario.Read"],
+  PAGOS: ["api://5d7ead55-12ca-4dcd-97e8-5b5e81f77f4b/Pagos.Write"]
 };
 
 const PRECIOS_PRODUCTOS = {
@@ -211,12 +212,13 @@ function App() {
     const montoAPagar = boleta ? boleta.total : 15000;
     const numBoleta = boleta ? boleta.numero : 'BOL-SAMPLETEST';
 
+    // Se realiza la autenticación en Azure MSAL enviando el Scope de Pagos
     await callApi(SERVICES.PAGOS, 'POST', { 
       boleta: numBoleta,
       monto: montoAPagar, 
       numeroTarjeta: '4532XXXXXXXX8892',
       estado: 'APROBADO' 
-    });
+    }, SCOPES.PAGOS);
 
     if (boleta) {
       const boletaPagada = {
@@ -516,7 +518,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(inventario.length ? inventario : { "Hamburguesa Triple": 50, "Pizza Familiar": 30, "Papas Supremas": 100, "Pastel de Chocolate": 20, "Bebida Grande": 80 }).map(([prod, stock]) => (
+                  {Object.entries(Object.keys(inventario).length > 0 ? inventario : { "Hamburguesa Triple": 50, "Pizza Familiar": 30, "Papas Supremas": 100, "Pastel de Chocolate": 20, "Bebida Grande": 80 }).map(([prod, stock]) => (
                     <tr key={prod} style={{ borderBottom: '1px solid #eee' }}>
                       <td style={{ padding: '8px' }}><strong>{prod}</strong></td>
                       <td style={{ padding: '8px', textAlign: 'center' }}>{stock} unidades</td>
